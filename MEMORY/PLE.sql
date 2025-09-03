@@ -32,56 +32,35 @@ FROM tm_cte, cached_cte;
 
 
 
--- Breaks down buffers used by current database
--- by object (table, index) in the buffer cache
-SELECT OBJECT_NAME(p.[object_id]) AS [ObjectName],
-p.index_id, COUNT(*)/128 AS [Buffer size(MB)], COUNT(*) AS [BufferCount],
-p.data_compression_desc AS [CompressionType]
-FROM sys.allocation_units AS a WITH (NOLOCK)
-INNER JOIN sys.dm_os_buffer_descriptors AS b WITH (NOLOCK)
-ON a.allocation_unit_id = b.allocation_unit_id
-INNER JOIN sys.partitions AS p WITH (NOLOCK)
-ON a.container_id = p.hobt_id
-WHERE b.database_id = CONVERT(int,DB_ID())
-AND p.[object_id] > 100
-GROUP BY p.[object_id], p.index_id, p.data_compression_desc
-ORDER BY [BufferCount] DESC OPTION (RECOMPILE);
--- Tells you what tables and indexes are
--- using the most memory in the buffer cache
-
-
 --Verifica o PLE de dentro do SQL Server
+-- Coluna PageLife o ideal é maior que 1000
+--
 SELECT
-ple.[Node]
-,LTRIM(STR([PageLife_S]/3600))+':'+REPLACE(STR([PageLife_S]%3600/60,2),SPACE(1),'0')+':'+REPLACE(STR([PageLife_S]%60,2),SPACE(1),'0') [PageLife]
-,ple.[PageLife_S]
-,dp.[DatabasePages] [BufferPool_Pages]
-,CONVERT(DECIMAL(15,3),dp.[DatabasePages]*0.0078125) [BufferPool_MiB] ,CONVERT(DECIMAL(15,3),dp.[DatabasePages]*0.0078125/[PageLife_S]) [BufferPool_MiB_S]
+    ple.[node]
+, LTRIM(STR([PageLife_S]/3600))+':'+REPLACE(STR([PageLife_S]%3600/60,2),SPACE(1),'0') +':'+REPLACE(STR([PageLife_S]%60,2),SPACE(1),'0') [PageLife]
+, ple.[PageLife_S]
+, dp.[DatabasePages] [BufferPool_Pages]
+, CONVERT(DECIMAL(15,3),dp.[DatabasePages]*0.0078125) [BufferPool_Mib]
+, CONVERT(DECIMAL(15,3),dp.[DatabasePages]*0.0078125/[PageLife_S]) [BufferPool_Mib_S]
 FROM
-(
-SELECT [instance_name] [node],[cntr_value] [PageLife_S] 
-FROM sys.dm_os_performance_counters
-WHERE [counter_name] = 'Page life expectancy'
+    (
+SELECT [instance_name] [node], [cntr_value] [PageLife_S]
+    FROM sys.dm_os_performance_counters
+    where [counter_name] = 'Page life expectancy'
 ) ple
-INNER JOIN
-(
-SELECT [instance_name] [node],[cntr_value] [DatabasePages] FROM 
-sys.dm_os_performance_counters
-WHERE [counter_name] = 'Database pages'
-) dp ON ple.[node] = dp.[node]
+    INNER JOIN
+    (
+SELECT [instance_name] [node], [cntr_value] [DatabasePages]
+    from sys.dm_os_performance_counters
+    where [counter_name] = 'Database pages'
+) dp on ple.[node] = dp.[node]
+-- Page Life Expectancy
+SELECT [object_name],
+    [counter_name],
+    [cntr_value]
+FROM sys.dm_os_performance_counters
+WHERE [object_name] LIKE '%Manager%'
+    AND [counter_name] = 'Page life expectancy'
 
 
-
-
-
-SELECT 
-    physical_memory_in_use_kb / 1024 AS physical_memory_in_use_mb,
-    large_page_allocations_kb / 1024 AS large_page_allocations_mb,
-    locked_page_allocations_kb / 1024 AS locked_page_allocations_mb,
-    total_virtual_address_space_kb / 1024 AS total_virtual_address_space_mb,
-    virtual_address_space_reserved_kb / 1024 AS virtual_address_space_reserved_mb,
-    virtual_address_space_committed_kb / 1024 AS virtual_address_space_committed_mb,
-    virtual_address_space_available_kb / 1024 AS virtual_address_space_available_mb,
-    process_physical_memory_low,
-    process_virtual_memory_low
-FROM sys.dm_os_process_memory;
+-- fonte: https://www.youtube.com/watch?v=qo8FNtCVXCs
